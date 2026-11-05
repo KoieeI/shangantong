@@ -75,7 +75,13 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          # 运行器网络抖动会让依赖下载失败（同一份代码两次跑挂在不同步骤），给三次机会
+          ok=0
+          for i in 1 2 3; do
+            if ./gradlew assembleDebug --no-daemon --stacktrace; then ok=1; break; fi
+            echo "第 $i 次构建失败，30 秒后重试"; sleep 30
+          done
+          [ "$ok" = "1" ] && test -f app/build/outputs/apk/debug/app-debug.apk
       - uses: actions/upload-artifact@v4
         with:
           name: android-apk
@@ -95,7 +101,14 @@ jobs:
       - name: 生成 iOS 工程
         run: npx cap add ios
       - name: 应用应用图标
-        run: npx --yes @capacitor/assets@3 generate --ios
+        run: |
+          # npx 现取 @capacitor/assets，npm 抖动会让这一步挂掉，给三次机会
+          ok=0
+          for i in 1 2 3; do
+            if npx --yes @capacitor/assets@3 generate --ios; then ok=1; break; fi
+            echo "第 $i 次失败，30 秒后重试"; sleep 30
+          done
+          [ "$ok" = "1" ]
       - name: 同步配置
         run: npx cap sync ios
       - name: 编译（不签名）
