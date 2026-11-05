@@ -1,0 +1,138 @@
+name: build-all
+
+# 手动点 Run workflow，或推送到 main 时自动构建
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows 安装包
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 还原应用图标
+        shell: bash
+        run: base64 -d icon.b64 > app.ico
+      - name: 安装依赖
+        run: npm install --no-audit --no-fund
+      - name: 打包 NSIS 安装包
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder --win nsis --x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: desktop/release/*.exe
+          if-no-files-found: error
+
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: 安装依赖
+        run: npm install --no-audit --no-fund
+      - name: 生成 Android 工程
+        run: npx cap add android
+      - name: 同步配置
+        run: npx cap sync android
+      - name: 构建 debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+  ios:
+    name: iOS 未签名 IPA
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 安装依赖
+        run: npm install --no-audit --no-fund
+      - name: 生成 iOS 工程
+        run: npx cap add ios
+      - name: 同步配置
+        run: npx cap sync ios
+      - name: 编译（不签名）
+        run: |
+          cd ios/App
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            build
+      - name: 打包成 ipa
+        run: |
+          APP=$(find ios/App/build/Build/Products -name "App.app" -maxdepth 4 | head -1)
+          echo "app path: $APP"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry ShangAnTong-unsigned.ipa Payload
+          ls -lh ShangAnTong-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: ShangAnTong-unsigned.ipa
+          if-no-files-found: error
+
+  release:
+    name: 汇总到 Release
+    needs: [windows, android, ios]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: 统一文件名
+        run: |
+          set -e
+          mv dist/windows-installer/*.exe dist/ShangAnTong-Setup.exe
+          mv dist/android-apk/*.apk dist/ShangAnTong-Android.apk
+          mv dist/ios-ipa/*.ipa dist/ShangAnTong-unsigned.ipa
+          ls -lh dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: 上岸通 v1.0.${{ github.run_number }}
+          body: |
+            - **ShangAnTong-Setup.exe**：Windows 安装包（未签名，首次运行需「更多信息 → 仍要运行」）
+            - **ShangAnTong-Android.apk**：Android debug 包（安装时允许「未知来源」）
+            - **ShangAnTong-unsigned.ipa**：iOS 未签名包，用爱思助手以你的 Apple ID 自签后安装
+          files: |
+            dist/ShangAnTong-Setup.exe
+            dist/ShangAnTong-Android.apk
+            dist/ShangAnTong-unsigned.ipa

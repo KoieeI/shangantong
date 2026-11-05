@@ -1,0 +1,9 @@
+node_modules/
+ios/App/Pods/
+ios/App/build/
+android/.gradle/
+android/build/
+android/app/build/
+*.ipa
+*.apk
+*.exe
