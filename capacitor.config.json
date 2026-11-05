@@ -17,5 +17,19 @@
   "ios": {
     "contentInset": "never",
     "scrollEnabled": true
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "launchShowDuration": 900,
+      "backgroundColor": "#f7f5f0",
+      "showSpinner": false,
+      "androidScaleType": "CENTER_CROP"
+    },
+    "StatusBar": {
+      "overlaysWebView": false,
+      "style": "DARK",
+      "backgroundColor": "#f7f5f0"
+    }
   }
 }

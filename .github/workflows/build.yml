@@ -61,6 +61,8 @@ jobs:
         run: npx --yes @capacitor/assets@3 generate --android
       - name: 同步配置
         run: npx cap sync android
+      - name: 补通知权限（AndroidManifest）
+        run: node native/patch-android.mjs
       - name: 构建 debug APK
         run: |
           cd android
