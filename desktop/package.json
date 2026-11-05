@@ -23,7 +23,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "KoeeiI",
+        "owner": "KoieeI",
         "repo": "shangantong",
         "releaseType": "release"
       }

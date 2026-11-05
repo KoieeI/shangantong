@@ -7,3 +7,9 @@ android/app/build/
 *.ipa
 *.apk
 *.exe
+
+# 本地打包产物（electron-builder / 本地验证）
+desktop/release/
+desktop/reltest/
+desktop/_release_old/
+desktop/package-lock.json
