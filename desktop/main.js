@@ -5,7 +5,7 @@
    - 外链一律交给系统浏览器，避免在应用内被钓鱼页面困住；
    - 窗口大小/位置记忆在 userData 里，下次打开还原。 */
 'use strict';
-const { app, BrowserWindow, shell, Menu, dialog } = require('electron');
+const { app, BrowserWindow, shell, Menu, dialog, session } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -109,6 +109,30 @@ function createWindow() {
   win.on('closed', () => { win = null; });
 }
 
+/* ---------- 下载处理 ----------
+   WebView 里的 <a download>（导出备份、导出 .ics、文档转换产物）默认会被丢弃，
+   这是"在软件里点了导出但什么都没发生"的原因。
+   挂上下载会话：让用户选一次保存位置，完成后弹框告知具体路径。 */
+function setupDownloads() {
+  const ses = (win && win.webContents ? win.webContents.session : session.defaultSession);
+  if (!ses || ses.__dlHooked) return;
+  ses.__dlHooked = true;
+  ses.on('will-download', (e, item, wc) => {
+    try { item.setSaveDialogOptions({ defaultPath: item.getFilename() }); } catch (err) { }
+    item.once('done', (ev, state) => {
+      if (state !== 'completed') return;
+      dialog.showMessageBox(win || null, {
+        type: 'info',
+        title: '已保存',
+        message: '文件已保存',
+        detail: item.getSavePath(),
+        buttons: ['好的'],
+        noLink: true
+      }).catch(() => { });
+    });
+  });
+}
+
 /* 单实例：重复点击图标时聚焦已有窗口，而不是开出第二个 */
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -120,6 +144,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
     createWindow();
+    setupDownloads();
     setupAutoUpdate();
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
   });
