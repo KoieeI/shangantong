@@ -49,7 +49,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
+      # ubuntu-latest 自带 Android SDK，不用再装 setup-android（那步在 runner 上常因 sdkmanager 报错）
+      - name: 接受 SDK 许可
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
       - name: 安装依赖
         run: npm install --no-audit --no-fund
       - name: 生成 Android 工程
