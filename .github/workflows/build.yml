@@ -24,14 +24,22 @@ jobs:
           node-version: 20
       - name: 安装依赖
         run: npm install --no-audit --no-fund
+      - name: 写入版本号
+        # 自动更新靠 app.getVersion() 与 latest.yml 比对判断新旧，版本号必须每次都涨
+        run: npm version 1.0.${{ github.run_number }} --no-git-tag-version
       - name: 打包 NSIS 安装包
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npx electron-builder --win nsis --x64
+        run: npx electron-builder --win nsis --x64 --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installer
-          path: desktop/release/*.exe
+          # latest.yml 与 blockmap 是应用内更新的必需件：少了前者不会提示更新，
+          # 少了后者会退化成整包下载（78MB）
+          path: |
+            desktop/release/*.exe
+            desktop/release/latest.yml
+            desktop/release/*.blockmap
           if-no-files-found: error
 
   android:
@@ -129,7 +137,11 @@ jobs:
       - name: 统一文件名
         run: |
           set -e
+          # 安装包的最终名字由 electron-builder 的 artifactName 决定，这里不能再改名：
+          # latest.yml 里登记的就是 ShangAnTong-Setup.exe，改名会让自动更新 404
           mv dist/windows-installer/*.exe dist/ShangAnTong-Setup.exe
+          mv dist/windows-installer/latest.yml dist/latest.yml
+          mv dist/windows-installer/*.blockmap dist/ShangAnTong-Setup.exe.blockmap
           mv dist/android-apk/*.apk dist/ShangAnTong-Android.apk
           mv dist/ios-ipa/*.ipa dist/ShangAnTong-unsigned.ipa
           ls -lh dist
@@ -141,7 +153,11 @@ jobs:
             - **ShangAnTong-Setup.exe**：Windows 安装包（未签名，首次运行需「更多信息 → 仍要运行」）
             - **ShangAnTong-Android.apk**：Android debug 包（安装时允许「未知来源」）
             - **ShangAnTong-unsigned.ipa**：iOS 未签名包，用爱思助手以你的 Apple ID 自签后安装
+
+            Windows 版已内置应用内更新：装过一次之后，新版本会自动差分下载（通常 1–5MB），重启即生效。
           files: |
             dist/ShangAnTong-Setup.exe
+            dist/latest.yml
+            dist/ShangAnTong-Setup.exe.blockmap
             dist/ShangAnTong-Android.apk
             dist/ShangAnTong-unsigned.ipa
