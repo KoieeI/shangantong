@@ -22,9 +22,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: 还原应用图标
-        shell: bash
-        run: base64 -d icon.b64 > app.ico
       - name: 安装依赖
         run: npm install --no-audit --no-fund
       - name: 打包 NSIS 安装包
@@ -60,6 +57,8 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: 生成 Android 工程
         run: npx cap add android
+      - name: 应用应用图标
+        run: npx --yes @capacitor/assets@3 generate --android
       - name: 同步配置
         run: npx cap sync android
       - name: 构建 debug APK
@@ -85,6 +84,8 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: 生成 iOS 工程
         run: npx cap add ios
+      - name: 应用应用图标
+        run: npx --yes @capacitor/assets@3 generate --ios
       - name: 同步配置
         run: npx cap sync ios
       - name: 编译（不签名）
