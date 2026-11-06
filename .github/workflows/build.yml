@@ -69,16 +69,33 @@ jobs:
         run: npx --yes @capacitor/assets@3 generate --android
       - name: 同步配置
         run: npx cap sync android
-      - name: 补权限（通知 / 存储 / 录音 / 日历）（AndroidManifest）
+      - name: 补权限（通知 / 存储 / 录音 / 日历 / 所有文件访问）（AndroidManifest）
         run: node native/patch-android.mjs
       - name: 校验权限已写入清单
         run: |
           set -e
           M=android/app/src/main/AndroidManifest.xml
-          for p in POST_NOTIFICATIONS RECORD_AUDIO READ_CALENDAR WRITE_CALENDAR; do
+          # MANAGE_EXTERNAL_STORAGE 少了 → 导出只能落 App 专属目录，用户在「下载」里找不到文件
+          for p in POST_NOTIFICATIONS RECORD_AUDIO READ_CALENDAR WRITE_CALENDAR MANAGE_EXTERNAL_STORAGE; do
             grep -q "android.permission.$p" "$M" || { echo "清单缺少 $p"; exit 1; }
             echo "ok $p"
           done
+          grep -q 'android:requestLegacyExternalStorage="true"' "$M" || { echo "缺少 requestLegacyExternalStorage"; exit 1; }
+          echo "ok requestLegacyExternalStorage"
+      - name: 校验 NativeFix 插件与状态栏 opt-out 已注入
+        run: |
+          set -e
+          # 插件类（状态栏真实尺寸 + 所有文件访问授权页）
+          PLUGIN=$(find android/app/src/main/java -name "NativeFixPlugin.java" | head -1)
+          test -n "$PLUGIN" || { echo "NativeFixPlugin.java 未生成"; exit 1; }
+          ACT=$(find android/app/src/main/java -name "MainActivity.java" | head -1)
+          test -n "$ACT" || { echo "找不到 MainActivity.java"; exit 1; }
+          grep -q "registerPlugin(NativeFixPlugin" "$ACT" || { echo "MainActivity 没有注册 NativeFix"; exit 1; }
+          echo "ok NativeFixPlugin 已注册 ($PLUGIN)"
+          # Android 15 强制 edge-to-edge 的退出开关：少了它顶栏会压在状态栏下面
+          grep -q "windowOptOutEdgeToEdgeEnforcement" android/app/src/main/res/values/styles.xml \
+            || { echo "styles.xml 缺少 windowOptOutEdgeToEdgeEnforcement"; exit 1; }
+          echo "ok edge-to-edge opt-out"
       - name: 校验插件已注册
         run: |
           set -e
