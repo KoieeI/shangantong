@@ -262,6 +262,79 @@ public class NativeFixPlugin extends Plugin {
             call.reject("OPEN_SETTINGS_FAILED: " + t.getMessage());
         }
     }
+
+    /* ------------------------------------------------------------------
+       系统「保存到…」对话框（SAF / ACTION_CREATE_DOCUMENT）
+       ------------------------------------------------------------------
+       WebView 里的 <a download> 在 Android 上是空操作，而直接往公共目录写文件
+       又依赖「所有文件访问」这种特殊权限（用户开了也可能因 ROM 差异写不进去）。
+       SAF 是 Google 从 Android 4.4 起就推荐的写法：用户自己选目录，
+       系统负责落盘授权，写成功就一定能看见 —— 不看任何存储权限的脸色。
+
+       回调在 onActivityResult，必须保留 pendingCall 等用户选完。 */
+    private PluginCall pendingSave;
+    private String pendingSaveContent;
+    private static final int REQ_SAVE_DOC = 0x5A17;
+
+    @PluginMethod
+    public void saveToDownloads(PluginCall call) {
+        String filename = call.getString("filename", "导出.txt");
+        String data = call.getString("data", "");
+        String mime = call.getString("mime", "application/octet-stream");
+        if (filename == null || filename.length() == 0) filename = "导出.txt";
+        if (data == null) data = "";
+        this.pendingSave = call;
+        this.pendingSaveContent = data;
+        try {
+            Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.setType(mime);
+            i.putExtra(Intent.EXTRA_TITLE, filename);
+            getActivity().startActivityForResult(i, REQ_SAVE_DOC);
+        } catch (Throwable t) {
+            PluginCall c = this.pendingSave;
+            this.pendingSave = null;
+            this.pendingSaveContent = null;
+            if (c != null) c.reject("SAF_START_FAILED: " + t.getMessage());
+        }
+    }
+
+    @Override
+    public void handleOnActivityResult(int requestCode, int resultCode, Intent data) {
+        super.handleOnActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQ_SAVE_DOC) return;
+        PluginCall c = this.pendingSave;
+        String content = this.pendingSaveContent;
+        this.pendingSave = null;
+        this.pendingSaveContent = null;
+        if (c == null) return;
+
+        JSObject ret = new JSObject();
+        if (resultCode != android.app.Activity.RESULT_OK || data == null || data.getData() == null) {
+            /* 用户按了返回：这是正常操作，不是错误 */
+            ret.put("ok", false);
+            ret.put("cancelled", true);
+            ret.put("err", "已取消");
+            c.resolve(ret);
+            return;
+        }
+        Uri uri = data.getData();
+        try {
+            java.io.OutputStream os = getContext().getContentResolver().openOutputStream(uri);
+            if (os == null) throw new java.io.IOException("openOutputStream 返回 null");
+            os.write((content == null ? "" : content).getBytes("UTF-8"));
+            os.flush();
+            os.close();
+            ret.put("ok", true);
+            ret.put("uri", uri.toString());
+            ret.put("where", "你刚才选择的文件夹（文件管理里能看到）");
+            c.resolve(ret);
+        } catch (Throwable t) {
+            ret.put("ok", false);
+            ret.put("err", "写入失败：" + t.getMessage());
+            c.resolve(ret);
+        }
+    }
 }
 `;
 

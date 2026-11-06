@@ -166,6 +166,31 @@
     });
   }
 
+  /* 系统「保存到…」对话框。插件方法 NativeFixPlugin.saveToDownloads 用
+     ACTION_CREATE_DOCUMENT 拉起系统文件选择器；用户选了目录并确认后才写文件，
+     成功与否由 onActivityResult 明确回报，不存在"以为成功其实没写"。 */
+  function saveViaSaf(name, text) {
+    var NF = plugin('NativeFix');
+    if (!NF || !NF.saveToDownloads) return Promise.resolve({ ok: false, err: 'noplugin' });
+    var mime = /\.ics$/i.test(name) ? 'text/calendar'
+      : /\.json$/i.test(name) ? 'application/json' : 'application/octet-stream';
+    var p;
+    try {
+      p = NF.saveToDownloads({ filename: name, data: text, mime: mime });
+    } catch (e) {
+      return Promise.resolve({ ok: false, err: String((e && e.message) || e) });
+    }
+    return Promise.resolve(p).then(function (r) {
+      if (r && r.ok) {
+        return { ok: true, uri: r.uri || '', dir: 'SAF', allFiles: true,
+                 where: r.where || '你刚才选择的文件夹' };
+      }
+      return { ok: false, err: (r && r.err) || 'cancelled', cancelled: !!(r && r.cancelled) };
+    }).catch(function (e) {
+      return { ok: false, err: String((e && e.message) || e) };
+    });
+  }
+
   function exportFile(name, text) {
     if (!CAP) return Promise.resolve({ ok: false, err: '非原生环境' });
     var FS = plugin('Filesystem');
@@ -178,11 +203,20 @@
       return hasAllFiles().then(function (all) {
         var chain = Promise.resolve();
 
+        /* ⓪ 首选：系统「保存到…」对话框（SAF）。用户自己选目录、系统负责落盘，
+           不需要任何存储权限，也不会出现"提示成功但找不到文件"。 */
+        chain = chain.then(function () {
+          return saveViaSaf(safe, body).then(function (sp) {
+            if (sp && sp.cancelled) return { ok: false, cancelled: true, err: '已取消' };
+            return (sp && sp.ok) ? sp : null;
+          }).catch(function () { return null; });
+        });
+
         if (all === true) {
           chain = chain.then(function () {
             return FS.writeFile({
               path: 'Download/上岸通/' + safe, data: body,
-              directory: 'EXTERNAL_STORAGE', encoding: 'UTF8', recursive: true
+              directory: 'EXTERNAL_STORAGE', encoding: 'utf8', recursive: true
             }).then(function (r) {
               var uri = (r && r.uri) || '';
               return shareFile(uri, safe).then(function () {
@@ -197,7 +231,7 @@
           if (hit) return hit;
           return FS.writeFile({
             path: '上岸通/' + safe, data: body,
-            directory: 'DOCUMENTS', encoding: 'UTF8', recursive: true
+            directory: 'DOCUMENTS', encoding: 'utf8', recursive: true
           }).then(function (r) {
             var uri = (r && r.uri) || '';
             return shareFile(uri, safe).then(function () {
@@ -209,7 +243,7 @@
           if (hit2) return hit2;
           return FS.writeFile({
             path: '上岸通/' + safe, data: body,
-            directory: 'EXTERNAL', encoding: 'UTF8', recursive: true
+            directory: 'EXTERNAL', encoding: 'utf8', recursive: true
           }).then(function (r) {
             var uri = (r && r.uri) || '';
             return shareFile(uri, safe).then(function () {
@@ -226,7 +260,7 @@
 
     return Promise.resolve(FS.writeFile({
       path: '上岸通/' + safe, data: body,
-      directory: 'DOCUMENTS', encoding: 'UTF8', recursive: true
+      directory: 'DOCUMENTS', encoding: 'utf8', recursive: true
     })).then(function (r) {
       var uri = (r && r.uri) || '';
       return shareFile(uri, safe).then(function () {
