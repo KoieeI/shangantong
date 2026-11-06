@@ -10,11 +10,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const P = 'android/app/src/main/AndroidManifest.xml';
+/* 权限清单：
+   - POST_NOTIFICATIONS / SCHEDULE_EXACT_ALARM / RECEIVE_BOOT_COMPLETED / VIBRATE：通知与触感
+   - READ_MEDIA_*（Android 13+ 媒体三件套）与 READ/WRITE_EXTERNAL_STORAGE（≤Android 12）：
+     存储类权限。注意 Android 11+ 公共目录写入靠的是 scoped storage，
+     App 导出走的是无需权限的 App 专属目录，这几条是给图片选择/系统文件器兜底 */
 const NEED = [
-  'android.permission.POST_NOTIFICATIONS',
-  'android.permission.SCHEDULE_EXACT_ALARM',
-  'android.permission.RECEIVE_BOOT_COMPLETED',
-  'android.permission.VIBRATE'
+  { name: 'android.permission.POST_NOTIFICATIONS' },
+  { name: 'android.permission.SCHEDULE_EXACT_ALARM' },
+  { name: 'android.permission.RECEIVE_BOOT_COMPLETED' },
+  { name: 'android.permission.VIBRATE' },
+  { name: 'android.permission.READ_MEDIA_IMAGES' },
+  { name: 'android.permission.READ_MEDIA_VIDEO' },
+  { name: 'android.permission.READ_MEDIA_AUDIO' },
+  { name: 'android.permission.READ_EXTERNAL_STORAGE', maxSdk: 32 },
+  { name: 'android.permission.WRITE_EXTERNAL_STORAGE', maxSdk: 29 }
 ];
 
 if (!fs.existsSync(P)) {
@@ -26,21 +36,22 @@ let xml = fs.readFileSync(P, 'utf8');
 const added = [];
 
 for (const perm of NEED) {
-  if (xml.includes(`android:name="${perm}"`)) continue;
-  const tag = `    <uses-permission android:name="${perm}" />\n`;
+  if (xml.includes(`android:name="${perm.name}"`)) continue;
+  const extra = perm.maxSdk ? ` android:maxSdkVersion="${perm.maxSdk}"` : '';
+  const tag = `    <uses-permission android:name="${perm.name}"${extra} />\n`;
   if (xml.includes('<application')) {
     xml = xml.replace('<application', tag + '    <application');
   } else {
     xml = xml.replace('</manifest>', tag + '</manifest>');
   }
-  added.push(perm);
+  added.push(perm.name + (perm.maxSdk ? '（≤API ' + perm.maxSdk + '）' : ''));
 }
 
 fs.writeFileSync(P, xml);
 console.log('[patch-android] 新增权限 ' + (added.length ? added.join(', ') : '（无，已齐全）'));
 
 /* 自检：必须全部在文件里，否则让 CI 红掉，而不是产出一个"装得上但不提醒"的包 */
-const missing = NEED.filter(p => !xml.includes(`android:name="${p}"`));
+const missing = NEED.filter(p => !xml.includes(`android:name="${p.name}"`));
 if (missing.length) {
   console.error('[patch-android] 权限补丁失败: ' + missing.join(', '));
   process.exit(1);
