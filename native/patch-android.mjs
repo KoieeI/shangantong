@@ -57,3 +57,5 @@ if (missing.length) {
   process.exit(1);
 }
 console.log('[patch-android] ok');
+
+/* 重跑标记 2026-11-06：上一轮 iOS 作业被运行器取消，Windows/Android 已通过 */
