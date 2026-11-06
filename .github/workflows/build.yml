@@ -142,22 +142,31 @@ jobs:
   release:
     name: 汇总到 Release
     needs: [windows, android, ios]
+    # mac 运行器多次在启动 1 秒内被取消（GitHub 侧问题），不能让它挡住
+    # Windows/Android 的更新发布——iOS 缺席时本次 Release 就不带新 IPA。
+    if: always() && needs.windows.result == 'success' && needs.android.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: dist
-      - name: 统一文件名
+        continue-on-error: true
+      - name: 摊平产物
         run: |
           set -e
+          mkdir -p out
           # 安装包的最终名字由 electron-builder 的 artifactName 决定，这里不能再改名：
           # latest.yml 里登记的就是 ShangAnTong-Setup.exe，改名会让自动更新 404
-          mv dist/windows-installer/*.exe dist/ShangAnTong-Setup.exe
-          mv dist/windows-installer/latest.yml dist/latest.yml
-          mv dist/windows-installer/*.blockmap dist/ShangAnTong-Setup.exe.blockmap
-          mv dist/android-apk/*.apk dist/ShangAnTong-Android.apk
-          mv dist/ios-ipa/*.ipa dist/ShangAnTong-unsigned.ipa
-          ls -lh dist
+          [ -f dist/windows-installer/ShangAnTong-Setup.exe ] && cp dist/windows-installer/ShangAnTong-Setup.exe out/
+          [ -f dist/windows-installer/latest.yml ] && cp dist/windows-installer/latest.yml out/
+          [ -f dist/windows-installer/ShangAnTong-Setup.exe.blockmap ] && cp dist/windows-installer/ShangAnTong-Setup.exe.blockmap out/
+          if [ -d dist/android-apk ]; then for f in dist/android-apk/*.apk; do [ -f "$f" ] && cp "$f" out/ShangAnTong-Android.apk; done; fi
+          if [ -d dist/ios-ipa ]; then for f in dist/ios-ipa/*.ipa; do [ -f "$f" ] && cp "$f" out/ShangAnTong-unsigned.ipa; done; fi
+          ls -lh out
+          # 更新必需件缺失就直接失败：宁可不出 Release，也不能出装不上的包
+          test -f out/ShangAnTong-Setup.exe
+          test -f out/latest.yml
+          test -f out/ShangAnTong-Setup.exe.blockmap
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
@@ -168,9 +177,4 @@ jobs:
             - **ShangAnTong-unsigned.ipa**：iOS 未签名包，用爱思助手以你的 Apple ID 自签后安装
 
             Windows 版已内置应用内更新：装过一次之后，新版本会自动差分下载（通常 1–5MB），重启即生效。
-          files: |
-            dist/ShangAnTong-Setup.exe
-            dist/latest.yml
-            dist/ShangAnTong-Setup.exe.blockmap
-            dist/ShangAnTong-Android.apk
-            dist/ShangAnTong-unsigned.ipa
+          files: out/*
