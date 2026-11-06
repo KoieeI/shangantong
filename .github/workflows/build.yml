@@ -84,7 +84,9 @@ jobs:
           set -e
           F=android/app/src/main/assets/capacitor.plugins.json
           test -f "$F" || { echo "缺 capacitor.plugins.json"; exit 1; }
-          for p in Filesystem Share LocalNotifications CapacitorCalendar Microphone; do
+          # 这个文件里登记的是 npm 包名，不是插件类名，按包名校验
+          for p in "@capacitor/filesystem" "@capacitor/share" "@capacitor/local-notifications" \
+                   "@ebarooni/capacitor-calendar" "@mozartec/capacitor-microphone"; do
             grep -q "\"$p\"" "$F" || { echo "插件未注册：$p"; cat "$F"; exit 1; }
             echo "ok $p"
           done
