@@ -108,8 +108,19 @@ jobs:
           if-no-files-found: error
 
   ios:
-    name: iOS 未签名 IPA
-    runs-on: macos-14
+    name: iOS 未签名 IPA（${{ matrix.os }} 第 ${{ matrix.attempt }} 次）
+    # mac 运行器在公开仓库上常被「秒取消」（runner 未分配就 cancelled），
+    # 与代码无关。用矩阵在同一个作业定义里重试，并换一个镜像版本：
+    # 一个镜像池满了，另一个通常还空着。
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - { os: macos-14, attempt: 1 }
+          - { os: macos-15, attempt: 2 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
