@@ -82,6 +82,12 @@ jobs:
           done
           grep -q 'android:requestLegacyExternalStorage="true"' "$M" || { echo "缺少 requestLegacyExternalStorage"; exit 1; }
           echo "ok requestLegacyExternalStorage"
+          # tools:ignore 必须有命名空间，否则 ManifestMerger 直接 Error parsing（Capacitor 模板根节点不带 xmlns:tools）
+          grep -q 'xmlns:tools=' "$M" || { echo "AndroidManifest 缺少 xmlns:tools 命名空间"; head -3 "$M"; exit 1; }
+          echo "ok xmlns:tools"
+          # 直接让 XML 解析器过一遍，语法错在 CI 就拦住，别等到 Gradle 里才报 Error parsing
+          python3 -c "import xml.dom.minidom,sys; xml.dom.minidom.parse('$M')" || { echo "AndroidManifest.xml 解析失败"; exit 1; }
+          echo "ok AndroidManifest 可解析"
       - name: 校验 NativeFix 插件与状态栏 opt-out 已注入
         run: |
           set -e

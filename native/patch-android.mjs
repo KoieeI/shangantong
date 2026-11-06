@@ -57,11 +57,6 @@ if (!fs.existsSync(P)) {
 
 let xml = fs.readFileSync(P, 'utf8');
 
-/* tools:ignore 需要命名空间；cap 模板一般已带，缺了就补上 */
-if (xml.includes('tools:ignore') && !/xmlns:tools=/.test(xml)) {
-  xml = xml.replace('<manifest ', '<manifest xmlns:tools="http://schemas.android.com/tools" ');
-}
-
 const added = [];
 for (const perm of NEED) {
   if (xml.includes(`android:name="${perm.name}"`)) continue;
@@ -73,6 +68,21 @@ for (const perm of NEED) {
     xml = xml.replace('</manifest>', tag + '</manifest>');
   }
   added.push(perm.name.replace('android.permission.', '') + (perm.maxSdk ? '（≤API ' + perm.maxSdk + '）' : ''));
+}
+
+/* tools:ignore 需要命名空间。
+   ⚠ 必须放在「写入权限之后」判断：Capacitor 6.2 的模板根节点只有 xmlns:android，
+   没有 xmlns:tools。之前这个判断写在了写权限之前，那时 xml 里还没有 tools:ignore，
+   条件永远为假 → 命名空间永远补不上 → 构建时
+   ManifestMerger2$MergeFailureException: Error parsing AndroidManifest.xml。
+   （本地模拟工程的模板恰好带 tools，所以一直没复现出来。） */
+if (xml.includes('tools:ignore') && !/xmlns:tools=/.test(xml)) {
+  if (/<manifest[\s>]/.test(xml)) {
+    xml = xml.replace(/<manifest(\s)/, '<manifest xmlns:tools="http://schemas.android.com/tools"$1');
+  } else {
+    xml = xml.replace('<manifest>', '<manifest xmlns:tools="http://schemas.android.com/tools">');
+  }
+  added.push('xmlns:tools');
 }
 
 /* Android 10（API 29）用 legacy 存储模型才能直接写公共文档目录；
