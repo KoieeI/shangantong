@@ -7,7 +7,9 @@
     "android:add": "cap add android",
     "ios:add": "cap add ios",
     "sync": "cap sync",
-    "patch:android": "node native/patch-android.mjs"
+    "patch:android": "node native/patch-android.mjs",
+    "patch:ios": "node native/patch-ios.mjs",
+    "patch:all": "node native/patch-android.mjs && node native/patch-ios.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",
@@ -19,7 +21,9 @@
     "@capacitor/local-notifications": "^6.0.0",
     "@capacitor/share": "^6.0.0",
     "@capacitor/splash-screen": "^6.0.0",
-    "@capacitor/status-bar": "^6.0.0"
+    "@capacitor/status-bar": "^6.0.0",
+    "@ebarooni/capacitor-calendar": "^6.7.2",
+    "@mozartec/capacitor-microphone": "^6.0.0"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.2.0"

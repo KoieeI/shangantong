@@ -69,8 +69,25 @@ jobs:
         run: npx --yes @capacitor/assets@3 generate --android
       - name: 同步配置
         run: npx cap sync android
-      - name: 补通知权限（AndroidManifest）
+      - name: 补权限（通知 / 存储 / 录音 / 日历）（AndroidManifest）
         run: node native/patch-android.mjs
+      - name: 校验权限已写入清单
+        run: |
+          set -e
+          M=android/app/src/main/AndroidManifest.xml
+          for p in POST_NOTIFICATIONS RECORD_AUDIO READ_CALENDAR WRITE_CALENDAR; do
+            grep -q "android.permission.$p" "$M" || { echo "清单缺少 $p"; exit 1; }
+            echo "ok $p"
+          done
+      - name: 校验插件已注册
+        run: |
+          set -e
+          F=android/app/src/main/assets/capacitor.plugins.json
+          test -f "$F" || { echo "缺 capacitor.plugins.json"; exit 1; }
+          for p in Filesystem Share LocalNotifications CapacitorCalendar Microphone; do
+            grep -q "\"$p\"" "$F" || { echo "插件未注册：$p"; cat "$F"; exit 1; }
+            echo "ok $p"
+          done
       - name: 构建 debug APK
         run: |
           cd android
@@ -111,6 +128,28 @@ jobs:
           [ "$ok" = "1" ]
       - name: 同步配置
         run: npx cap sync ios
+      - name: 补 iOS 权限用途说明（Info.plist）
+        run: node native/patch-ios.mjs
+      - name: 校验 Info.plist 用途说明（缺任一项，首次申请权限即闪退）
+        run: |
+          set -e
+          P=ios/App/App/Info.plist
+          for k in NSMicrophoneUsageDescription NSCalendarsUsageDescription \
+                   NSCalendarsFullAccessUsageDescription NSCalendarsWriteOnlyAccessUsageDescription \
+                   NSRemindersUsageDescription NSRemindersFullAccessUsageDescription \
+                   UIFileSharingEnabled LSSupportsOpeningDocumentsInPlace; do
+            grep -q "<key>$k</key>" "$P" || { echo "Info.plist 缺少 $k"; exit 1; }
+            echo "ok $k"
+          done
+      - name: 校验 CocoaPods 已链接插件
+        run: |
+          set -e
+          L=ios/App/Podfile.lock
+          test -f "$L" || { echo "缺 Podfile.lock，pod install 未成功"; exit 1; }
+          for p in EbarooniCapacitorCalendar MozartecCapacitorMicrophone; do
+            grep -q "$p" "$L" || { echo "Pod 缺失：$p"; sed -n '1,80p' "$L"; exit 1; }
+            echo "ok $p"
+          done
       - name: 编译（不签名）
         run: |
           cd ios/App
