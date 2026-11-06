@@ -107,6 +107,10 @@ jobs:
           grep -q "com.android.tools.build:gradle:8.7.2" android/build.gradle \
             || { echo "AGP 未升到 8.7.2"; grep "com.android.tools.build" android/build.gradle; exit 1; }
           echo "ok AGP 8.7.2"
+          # AGP 8.7.2 要求 Gradle >= 8.9，wrapper 不跟着升会报 Minimum supported Gradle version
+          grep -q "gradle-8.9-all.zip" android/gradle/wrapper/gradle-wrapper.properties \
+            || { echo "gradle wrapper 未升到 8.9"; grep distributionUrl android/gradle/wrapper/gradle-wrapper.properties; exit 1; }
+          echo "ok gradle wrapper 8.9"
           # 页面补丁必须随 APK 一起打进 assets，否则远程站点没更新时 App 内修复不生效
           test -f android/app/src/main/assets/public/patch.js \
             || { echo "assets/public/patch.js 缺失"; exit 1; }

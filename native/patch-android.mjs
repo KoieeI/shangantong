@@ -440,6 +440,21 @@ if (fs.existsSync(ROOT_GRADLE)) {
   console.log('[patch-android] build.gradle AGP → 8.7.2');
 }
 
+/* AGP 8.7.2 要求 Gradle ≥ 8.9，模板 wrapper 还是 8.2.1，不一起升会直接报
+   "Minimum supported Gradle version is 8.9. Current version is 8.2.1"。
+   这里改 distributionUrl 里的版本号（保留 -all 后缀）。 */
+const WRAPPER = 'android/gradle/wrapper/gradle-wrapper.properties';
+if (fs.existsSync(WRAPPER)) {
+  let w = fs.readFileSync(WRAPPER, 'utf8');
+  const before = w;
+  w = w.replace(
+    /(gradle-)(\d+\.\d+(?:\.\d+)?)(-(?:all|bin))?\.zip/,
+    (all, a, ver, suffix) => a + '8.9' + (suffix || '-all') + '.zip'
+  );
+  if (w !== before) fs.writeFileSync(WRAPPER, w);
+  console.log('[patch-android] gradle wrapper → 8.9');
+}
+
 /* -------------------- 4. 补丁脚本放进 assets -------------------- */
 /* 远程站点改不动时，App 靠这个文件在页面加载后注入修复（详见 patch.js 顶部说明） */
 const patchSrc = path.join('native', 'patch.js');
