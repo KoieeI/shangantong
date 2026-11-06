@@ -519,8 +519,25 @@ if (fs.existsSync(ROOT_GRADLE)) {
     /com\.android\.tools\.build:gradle:8\.\d+\.\d+/,
     'com.android.tools.build:gradle:8.7.2'
   );
+
+  /* Maven Central 对 GitHub runner 的共享出口限流，会返回
+     "Received status code 429 from server: Too Many Requests"，
+     导致 kotlin-stdlib / httpmime 之类的基础依赖都拉不下来，构建直接失败。
+     在 google() / mavenCentral() 前面插一个镜像源（阿里云公共代理），
+     命中镜像就不再走 Maven Central；镜像没有的条目仍会回落到原仓库。
+     只插一次，幂等。 */
+  const MIRROR = "        maven { url 'https://maven.aliyun.com/repository/public' }\n" +
+                 "        maven { url 'https://maven.aliyun.com/repository/google' }\n" +
+                 "        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }\n";
+  if (!g.includes('maven.aliyun.com')) {
+    // 两处 repositories { google() ... }：buildscript 与 allprojects
+    g = g.replace(
+      /repositories\s*\{\s*\n(\s*)google\(\)/g,
+      (all, indent) => 'repositories {\n' + MIRROR + indent + 'google()'
+    );
+  }
   if (g !== before) fs.writeFileSync(ROOT_GRADLE, g);
-  console.log('[patch-android] build.gradle AGP → 8.7.2');
+  console.log('[patch-android] build.gradle AGP → 8.7.2' + (g.includes('maven.aliyun.com') ? ' + 阿里云镜像' : ''));
 }
 
 /* AGP 8.7.2 要求 Gradle ≥ 8.9，模板 wrapper 还是 8.2.1，不一起升会直接报
