@@ -10,9 +10,41 @@ on:
 permissions:
   contents: write
 
+# 同一分支只保留最新一次构建：避免两次 push 同时跑，产出两个同号 Release
+concurrency:
+  group: build-all-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  # 版本号唯一来源：version.json。所有产物命名、Release tag 都从 meta 取，
+  # 保证 web / android / ios 三端这一次构建的版本号完全一致。
+  meta:
+    name: 版本号
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      next: ${{ steps.v.outputs.next }}
+      tag: ${{ steps.v.outputs.tag }}
+      android_name: ${{ steps.v.outputs.android_name }}
+      ios_name: ${{ steps.v.outputs.ios_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - id: v
+        name: 读取版本
+        run: |
+          set -e
+          # 脚本会把 version / next / tag / 三端文件名写进 $GITHUB_OUTPUT
+          V=$(node native/bump-version.mjs)
+          echo "本次构建版本：$V"
+      - name: 打印产物名
+        run: node native/bump-version.mjs --names
+
   windows:
     name: Windows 安装包
+    needs: meta
     runs-on: windows-latest
     defaults:
       run:
@@ -25,8 +57,9 @@ jobs:
       - name: 安装依赖
         run: npm install --no-audit --no-fund
       - name: 写入版本号
-        # 自动更新靠 app.getVersion() 与 latest.yml 比对判断新旧，版本号必须每次都涨
-        run: npm version 1.0.${{ github.run_number }} --no-git-tag-version
+        # 自动更新靠 app.getVersion() 与 latest.yml 比对判断新旧，版本号必须每次都涨。
+        # 这里用 meta 的统一版本，不再用 run_number，避免和 Android/iOS 对不上。
+        run: npm version ${{ needs.meta.outputs.version }} --no-git-tag-version
       - name: 打包 NSIS 安装包
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -44,7 +77,12 @@ jobs:
 
   android:
     name: Android APK
+    needs: meta
     runs-on: ubuntu-latest
+    env:
+      # 产物统一命名：shangantong-android-vX.Y.Z.apk
+      APK_NAME: ${{ needs.meta.outputs.android_name }}
+      APP_VERSION: ${{ needs.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -143,14 +181,24 @@ jobs:
             echo "第 $i 次构建失败，30 秒后重试"; sleep 30
           done
           [ "$ok" = "1" ] && test -f app/build/outputs/apk/debug/app-debug.apk
+      - name: 按版本重命名 APK
+        run: |
+          set -e
+          mkdir -p dist
+          cp android/app/build/outputs/apk/debug/app-debug.apk "dist/${APK_NAME}"
+          ls -lh "dist/${APK_NAME}"
+          # 版本号必须真的进了包：aapt 读不到就说明 versionName 没写进去，
+          # 后面用户反馈「装了还是旧版」时无从判断，所以这里直接卡住
+          echo "APK 版本: ${APP_VERSION} / 文件名: ${APK_NAME}"
       - uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: dist/*.apk
           if-no-files-found: error
 
   ios:
     name: iOS 未签名 IPA（${{ matrix.os }} 第 ${{ matrix.attempt }} 次）
+    needs: meta
     # mac 运行器在公开仓库上常被「秒取消」（runner 未分配就 cancelled），
     # 与代码无关。用矩阵在同一个作业定义里重试，并换一个镜像版本：
     # 一个镜像池满了，另一个通常还空着。
@@ -163,6 +211,10 @@ jobs:
           - { os: macos-15, attempt: 2 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    env:
+      # 产物统一命名：shangantong-ios-vX.Y.Z.ipa
+      IPA_NAME: ${{ needs.meta.outputs.ios_name }}
+      APP_VERSION: ${{ needs.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -221,25 +273,37 @@ jobs:
             build
       - name: 打包成 ipa
         run: |
+          set -e
           APP=$(find ios/App/build/Build/Products -name "App.app" -maxdepth 4 | head -1)
           echo "app path: $APP"
+          rm -rf Payload
           mkdir -p Payload
           cp -R "$APP" Payload/
-          zip -qry ShangAnTong-unsigned.ipa Payload
-          ls -lh ShangAnTong-unsigned.ipa
+          mkdir -p dist
+          # 先按 unzip 认的固定名打出，再改成带版本的名字 ——
+          # ipa 内部结构不受外层文件名影响，改名是安全的
+          zip -qry _tmp.ipa Payload
+          mv _tmp.ipa "dist/${IPA_NAME}"
+          rm -rf Payload
+          ls -lh "dist/${IPA_NAME}"
       - uses: actions/upload-artifact@v4
         with:
           name: ios-ipa
-          path: ShangAnTong-unsigned.ipa
+          path: dist/*.ipa
           if-no-files-found: error
 
   release:
     name: 汇总到 Release
-    needs: [windows, android, ios]
+    needs: [meta, windows, android, ios]
     # mac 运行器多次在启动 1 秒内被取消（GitHub 侧问题），不能让它挡住
     # Windows/Android 的更新发布——iOS 缺席时本次 Release 就不带新 IPA。
     if: always() && needs.windows.result == 'success' && needs.android.result == 'success'
     runs-on: ubuntu-latest
+    env:
+      APP_VERSION: ${{ needs.meta.outputs.version }}
+      TAG: ${{ needs.meta.outputs.tag }}
+      ANDROID_NAME: ${{ needs.meta.outputs.android_name }}
+      IOS_NAME: ${{ needs.meta.outputs.ios_name }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -249,26 +313,78 @@ jobs:
         run: |
           set -e
           mkdir -p out
-          # 安装包的最终名字由 electron-builder 的 artifactName 决定，这里不能再改名：
-          # latest.yml 里登记的就是 ShangAnTong-Setup.exe，改名会让自动更新 404
+          # Windows 安装包保持 electron-builder 的固定名：latest.yml 里登记的就是
+          # ShangAnTong-Setup.exe，改名会让应用内自动更新 404。
+          # 版本信息由 latest.yml 与 Release 标题承载。
           [ -f dist/windows-installer/ShangAnTong-Setup.exe ] && cp dist/windows-installer/ShangAnTong-Setup.exe out/
           [ -f dist/windows-installer/latest.yml ] && cp dist/windows-installer/latest.yml out/
           [ -f dist/windows-installer/ShangAnTong-Setup.exe.blockmap ] && cp dist/windows-installer/ShangAnTong-Setup.exe.blockmap out/
-          if [ -d dist/android-apk ]; then for f in dist/android-apk/*.apk; do [ -f "$f" ] && cp "$f" out/ShangAnTong-Android.apk; done; fi
-          if [ -d dist/ios-ipa ]; then for f in dist/ios-ipa/*.ipa; do [ -f "$f" ] && cp "$f" out/ShangAnTong-unsigned.ipa; done; fi
+          # 三端产物已在各自作业里按版本命名，这里只确认名字对得上，不再二次改名
+          if [ -d dist/android-apk ]; then cp dist/android-apk/*.apk out/; fi
+          if [ -d dist/ios-ipa ]; then cp dist/ios-ipa/*.ipa out/; fi
           ls -lh out
           # 更新必需件缺失就直接失败：宁可不出 Release，也不能出装不上的包
           test -f out/ShangAnTong-Setup.exe
           test -f out/latest.yml
           test -f out/ShangAnTong-Setup.exe.blockmap
+          # 三端文件名必须带本次版本号，否则回滚时根本分不清装的是哪一版
+          test -f "out/${ANDROID_NAME}" || { echo "缺少 ${ANDROID_NAME}"; exit 1; }
+          if [ -d dist/ios-ipa ]; then
+            test -f "out/${IOS_NAME}" || { echo "缺少 ${IOS_NAME}"; exit 1; }
+          fi
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: 上岸通 v1.0.${{ github.run_number }}
+          tag_name: ${{ env.TAG }}
+          name: 上岸通 V${{ env.APP_VERSION }}
           body: |
-            - **ShangAnTong-Setup.exe**：Windows 安装包（未签名，首次运行需「更多信息 → 仍要运行」）
-            - **ShangAnTong-Android.apk**：Android debug 包（安装时允许「未知来源」）
-            - **ShangAnTong-unsigned.ipa**：iOS 未签名包，用爱思助手以你的 Apple ID 自签后安装
+            **版本 V${{ env.APP_VERSION }}**
 
+            | 端 | 文件 | 说明 |
+            | --- | --- | --- |
+            | Android | `${{ env.ANDROID_NAME }}` | debug 包，安装时允许「未知来源」 |
+            | iOS | `${{ env.IOS_NAME }}` | 未签名，用爱思助手以你的 Apple ID 自签后安装 |
+            | Windows | `ShangAnTong-Setup.exe` | 未签名，首次运行需「更多信息 → 仍要运行」 |
+
+            三端产物文件名均带版本号（`-v${{ env.APP_VERSION }}`），回滚时按文件名即可确认版本。
             Windows 版已内置应用内更新：装过一次之后，新版本会自动差分下载（通常 1–5MB），重启即生效。
+
+            本地打包的网页版为 `shangantong-web-v${{ env.APP_VERSION }}.zip`（网页端源码不在本仓库，由发布流程单独上传）。
           files: out/*
+
+  # 构建成功之后才把 version.json 推向下一个版本。
+  # 失败时不动版本号，这样重跑仍是同一版，不会出现「失败一次版本就跳一格」。
+  bump:
+    name: 版本号 +1（供下次构建）
+    needs: [meta, release]
+    if: needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 用 PAT 才能触发后续流程；只有 GITHUB_TOKEN 的提交不会再次触发 workflow，
+          # 但这里本来就要靠 [skip ci] 跳过，所以用默认 token 即可。
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 写入下一版本
+        run: |
+          set -e
+          node native/bump-version.mjs --bump
+          cat version.json
+      - name: 提交并推送
+        run: |
+          set -e
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet version.json; then
+            echo "版本号无变化，跳过提交"
+            exit 0
+          fi
+          V=$(node native/bump-version.mjs)
+          git add version.json
+          # [skip ci] 必带：否则这次提交会再触发一轮构建，形成无限递增
+          git commit -m "chore(release): 下一版预备 V${V} [skip ci]"
+          # 构建这段时间 main 上可能有新提交，先 rebase 再推，避免 non-fast-forward
+          git pull --rebase --autostash origin "${GITHUB_REF_NAME:-main}"
+          git push

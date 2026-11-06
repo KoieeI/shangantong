@@ -92,6 +92,60 @@ if (!/android:requestLegacyExternalStorage=/.test(xml)) {
   added.push('requestLegacyExternalStorage');
 }
 
+/* FileProvider：openWithCalendar 要把 cache 里的 .ics 以 content:// 交给日历 App。
+   Capacitor 模板默认就带一个 provider（authority = ${applicationId}.fileprovider），
+   但 res/xml/file_paths.xml 只声明了 images 目录时 cache 里的文件会抛
+   IllegalArgumentException: Failed to find configured root。
+   这里做两件事：没有 provider 就补一个；有就确保 file_paths.xml 覆盖 cache。 */
+const APP_ID_FOR_PROVIDER = (() => {
+  try { return JSON.parse(fs.readFileSync('capacitor.config.json', 'utf8')).appId || 'com.shangantong.app'; }
+  catch (e) { return 'com.shangantong.app'; }
+})();
+if (!/\.fileprovider/.test(xml)) {
+  /* 按 </application> 前面的实际缩进对齐，生成出来的清单才像人手写的 */
+  xml = xml.replace(/(\r?\n)([ \t]*)<\/application>/,
+    (m, nl, ind) =>
+      nl + ind + '    <provider' + nl +
+      ind + '        android:name="androidx.core.content.FileProvider"' + nl +
+      ind + '        android:authorities="' + APP_ID_FOR_PROVIDER + '.fileprovider"' + nl +
+      ind + '        android:exported="false"' + nl +
+      ind + '        android:grantUriPermissions="true">' + nl +
+      ind + '        <meta-data' + nl +
+      ind + '            android:name="android.support.FILE_PROVIDER_PATHS"' + nl +
+      ind + '            android:resource="@xml/file_paths" />' + nl +
+      ind + '    </provider>' + nl +
+      ind + '</application>');
+  added.push('FileProvider');
+}
+const XML_DIR = 'android/app/src/main/res/xml';
+fs.mkdirSync(XML_DIR, { recursive: true });
+const FILE_PATHS = '<?xml version="1.0" encoding="utf-8"?>\n' +
+  '<!-- 由 native/patch-android.mjs 生成：FileProvider 可分享的目录白名单。\n' +
+  '     cache 是导出日历用的临时目录，files 用于其它内部导出。 -->\n' +
+  '<paths xmlns:android="http://schemas.android.com/apk/res/android">\n' +
+  '    <cache-path name="cache" path="." />\n' +
+  '    <files-path name="files" path="." />\n' +
+  '    <external-files-path name="ext_files" path="." />\n' +
+  '</paths>\n';
+const fpFile = path.join(XML_DIR, 'file_paths.xml');
+const fpOld = fs.existsSync(fpFile) ? fs.readFileSync(fpFile, 'utf8') : '';
+/* 只补缺失的条目：模板可能还声明了 images 之类，整体覆盖会连带干掉别的功能 */
+let fpNew = fpOld;
+if (!fpOld) {
+  fpNew = FILE_PATHS;
+} else {
+  if (!/<cache-path/.test(fpNew)) {
+    fpNew = fpNew.replace('</paths>', '    <cache-path name="cache" path="." />\n</paths>');
+  }
+  if (!/<files-path/.test(fpNew)) {
+    fpNew = fpNew.replace('</paths>', '    <files-path name="files" path="." />\n</paths>');
+  }
+}
+if (fpNew !== fpOld) {
+  fs.writeFileSync(fpFile, fpNew);
+  console.log('[patch-android] 更新 ' + fpFile);
+}
+
 fs.writeFileSync(P, xml);
 console.log('[patch-android] 新增：' + (added.length ? added.join(', ') : '（无，已齐全）'));
 
@@ -260,6 +314,64 @@ public class NativeFixPlugin extends Plugin {
             call.resolve();
         } catch (Throwable t) {
             call.reject("OPEN_SETTINGS_FAILED: " + t.getMessage());
+        }
+    }
+
+    /* ------------------------------------------------------------------
+       直接把 .ics 交给日历 App（ACTION_VIEW + FileProvider）
+       ------------------------------------------------------------------
+       用户真正的抱怨不是「文件没存下来」，而是「存下来了日历不认」：
+       在文件管理器里点 .ics，系统给出的常常是「用文本编辑器打开」，
+       甚至直接提示无法打开。原因是文件管理器只会按扩展名猜，
+       而 Android 的日历并不注册 .ics 的文件关联。
+
+       这里换一条路：把内容写进 cache，用 FileProvider 生成 content:// URI，
+       再以 text/calendar 显式发起 ACTION_VIEW。系统只会列出真正能处理
+       日历数据的应用（Google 日历 / 系统日历 / 各家 ROM 日历），
+       用户点一下就直接导入，全程不经过「文件管理」。
+
+       不依赖任何存储权限，也不产生用户需要清理的垃圾（cache 会被系统回收）。 */
+    @PluginMethod
+    public void openWithCalendar(PluginCall call) {
+        String filename = call.getString("filename", "calendar.ics");
+        String data = call.getString("data", "");
+        if (filename == null || filename.length() == 0) filename = "calendar.ics";
+        if (data == null) data = "";
+        try {
+            java.io.File dir = new java.io.File(getContext().getCacheDir(), "cal");
+            if (!dir.exists() && !dir.mkdirs()) {
+                throw new java.io.IOException("无法创建缓存目录");
+            }
+            java.io.File f = new java.io.File(dir, filename);
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(f);
+            fos.write(data.getBytes("UTF-8"));
+            fos.flush();
+            fos.close();
+
+            Uri uri = androidx.core.content.FileProvider.getUriForFile(
+                getContext(), getContext().getPackageName() + ".fileprovider", f);
+
+            Intent i = new Intent(Intent.ACTION_VIEW);
+            i.setDataAndType(uri, "text/calendar");
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            JSObject r = new JSObject();
+            try {
+                getContext().startActivity(i);
+            } catch (android.content.ActivityNotFoundException anf) {
+                /* 手机上真没装日历（少见但不为零）：告诉上层，让 JS 退回「保存文件」 */
+                r.put("ok", false);
+                r.put("err", "NO_CALENDAR_APP");
+                r.put("uri", uri.toString());
+                call.resolve(r);
+                return;
+            }
+            r.put("ok", true);
+            r.put("uri", uri.toString());
+            call.resolve(r);
+        } catch (Throwable t) {
+            call.reject("OPEN_CAL_FAILED: " + t.getMessage());
         }
     }
 
@@ -555,6 +667,30 @@ if (fs.existsSync(WRAPPER)) {
   console.log('[patch-android] gradle wrapper → 8.9');
 }
 
+/* -------------------- 3.5 版本号写进 APK -------------------- */
+/* 每次构建的版本号来自仓库根目录的 version.json（CI 的 meta 作业就是读它）。
+   必须落到 build.gradle，否则系统「应用信息」、崩溃日志、用户截图里
+   永远显示模板默认的 1.0，出问题时根本分不清用户装的是哪一版。
+   versionCode 要单调递增（Android 用它判断能否覆盖安装）：
+   1.0.18 → 10018，1.1.0 → 10100。 */
+const VER = (() => {
+  try { return String(JSON.parse(fs.readFileSync('version.json', 'utf8')).version || '').trim(); }
+  catch (e) { return ''; }
+})();
+const RG = 'android/app/build.gradle';
+if (VER && /^\d+\.\d+\.\d+$/.test(VER) && fs.existsSync(RG)) {
+  let g = fs.readFileSync(RG, 'utf8');
+  const before = g;
+  const [M, m2, p2] = VER.split('.').map(Number);
+  const vcode = M * 10000 + m2 * 100 + p2;
+  g = g.replace(/versionCode\s+\d+/, 'versionCode ' + vcode);
+  g = g.replace(/versionName\s+"[^"]*"/, 'versionName "' + VER + '"');
+  if (g !== before) fs.writeFileSync(RG, g);
+  console.log('[patch-android] versionName ' + VER + ' / versionCode ' + vcode);
+} else if (fs.existsSync(RG)) {
+  console.warn('[patch-android] 未读到 version.json，跳过版本号写入');
+}
+
 /* -------------------- 4. 补丁脚本放进 assets -------------------- */
 /* 远程站点改不动时，App 靠这个文件在页面加载后注入修复（详见 patch.js 顶部说明） */
 const patchSrc = path.join('native', 'patch.js');
@@ -595,6 +731,27 @@ if (!actSrc.includes('installWebPatch')) {
 }
 if (!xml.includes('android:requestLegacyExternalStorage="true"')) {
   console.error('[patch-android] 缺少 requestLegacyExternalStorage');
+  fail = 1;
+}
+if (VER && fs.existsSync(RG)) {
+  const g2 = fs.readFileSync(RG, 'utf8');
+  if (!g2.includes('versionName "' + VER + '"')) {
+    console.error('[patch-android] versionName 未写入 build.gradle');
+    fail = 1;
+  }
+}
+/* 「添加到日历」依赖 FileProvider + cache 白名单，少一个就会在点按钮时
+   IllegalArgumentException 崩掉，必须在这里卡住 */
+if (!/\.fileprovider/.test(xml)) {
+  console.error('[patch-android] AndroidManifest 缺少 FileProvider');
+  fail = 1;
+}
+if (!fs.existsSync(fpFile) || !/<cache-path/.test(fs.readFileSync(fpFile, 'utf8'))) {
+  console.error('[patch-android] file_paths.xml 缺少 cache-path');
+  fail = 1;
+}
+if (!PLUGIN_JAVA.includes('openWithCalendar')) {
+  console.error('[patch-android] 插件缺少 openWithCalendar 方法');
   fail = 1;
 }
 if (fail) process.exit(1);

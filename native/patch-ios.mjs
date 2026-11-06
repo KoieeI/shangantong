@@ -107,8 +107,7 @@ function main() {
     const replaced = replaceValue(xml, key, valueXml);
     if (replaced !== null) {
       if (replaced !== xml) updated.push(key);
-      xml = replaced;
-    } else {
+      xml = replaced;    } else {
       added.push(['<key>' + key + '</key>', valueXml]);
     }
   }
@@ -125,6 +124,25 @@ function main() {
       .map(([k, v]) => '\t' + k + '\n\t' + v)
       .join('\n');
     xml = xml.slice(0, idx) + lines + '\n' + xml.slice(idx);
+  }
+
+  /* 版本号：Capacitor 模板里是 $(MARKETING_VERSION)，而 CI 直接跑 xcodebuild
+     没有设置这个变量，打出来的包会显示 1.0。这里直接写死成 version.json 的版本，
+     保证「设置 → 通用 → iPhone 存储空间」里看到的版本与 Release 名一致。 */
+  let iosVer = '';
+  try {
+    iosVer = String(JSON.parse(fs.readFileSync('version.json', 'utf8')).version || '').trim();
+  } catch (e) { iosVer = ''; }
+  if (/^\d+\.\d+\.\d+$/.test(iosVer)) {
+    const [Ma, Mi, Pa] = iosVer.split('.').map(Number);
+    const build = Ma * 10000 + Mi * 100 + Pa;
+    const v1 = replaceValue(xml, 'CFBundleShortVersionString', '<string>' + iosVer + '</string>');
+    if (v1 !== null && v1 !== xml) { xml = v1; updated.push('CFBundleShortVersionString'); }
+    const v2 = replaceValue(xml, 'CFBundleVersion', '<string>' + build + '</string>');
+    if (v2 !== null && v2 !== xml) { xml = v2; updated.push('CFBundleVersion'); }
+    console.log('[patch-ios] 版本号 ' + iosVer + ' (build ' + build + ')');
+  } else {
+    console.warn('[patch-ios] 未读到 version.json，保留 Info.plist 原有版本字段');
   }
 
   if (xml !== before) {
