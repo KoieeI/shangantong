@@ -356,7 +356,10 @@ jobs:
   bump:
     name: 版本号 +1（供下次构建）
     needs: [meta, release]
-    if: needs.release.result == 'success'
+    # always() 不能省：iOS 的 macos-14 那条腿会被 GitHub 秒取消，
+    # 整次运行的状态跟着变成 cancelled，后续作业会被一律跳过 ——
+    # 那样「自动 +1」就永远不会执行，版本号会卡住。加 always() 才能照常判断。
+    if: always() && needs.release.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
