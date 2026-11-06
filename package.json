@@ -1,6 +1,6 @@
 {
   "name": "shangantong-app",
-  "version": "1.0.24",
+  "version": "1.0.26",
   "private": true,
   "description": "上岸通 · Android / iOS 壳工程（Capacitor）",
   "scripts": {
