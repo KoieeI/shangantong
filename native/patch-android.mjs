@@ -269,8 +269,12 @@ if (fs.existsSync(ACT_JAVA)) {
   const src = `package ${appId};
 
 import android.os.Bundle;
+import android.webkit.WebView;
 import androidx.core.view.WindowCompat;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.WebViewListener;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 
 public class MainActivity extends BridgeActivity {
     @Override
@@ -284,6 +288,50 @@ public class MainActivity extends BridgeActivity {
             WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
         } catch (Throwable ignored) {
         }
+        installWebPatch();
+    }
+
+    /**
+     * 把 assets/public/patch.js 注入到每一个加载完成的页面。
+     *
+     * 为什么需要：App 用 server.url 远程加载网页，网页要更新得能写进那个域名；
+     * 而该域名归属另一个运行时，当前账号改不动，换域名又会让 localStorage
+     * （按 origin 隔离）里的打卡/笔记/待办全部读不到。所以把修复做成随包分发的
+     * 补丁，在页面加载后注入：域名不变 → 数据不丢，补丁照样生效。
+     *
+     * patch.js 自带幂等与版本探测，远程站点将来更新了会自动让位。
+     */
+    private void installWebPatch() {
+        try {
+            final String patch = readAsset("public/patch.js");
+            if (patch == null || patch.length() == 0) return;
+            getBridge().addWebViewListener(new WebViewListener() {
+                @Override
+                public void onPageLoaded(WebView webView) {
+                    try {
+                        webView.evaluateJavascript(patch, null);
+                    } catch (Throwable ignored) {
+                    }
+                }
+            });
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private String readAsset(String name) {
+        InputStream is = null;
+        try {
+            is = getAssets().open(name);
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = is.read(buf)) > 0) bos.write(buf, 0, n);
+            return new String(bos.toByteArray(), "UTF-8");
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            try { if (is != null) is.close(); } catch (Throwable ignored) { }
+        }
     }
 }
 `;
@@ -293,8 +341,10 @@ public class MainActivity extends BridgeActivity {
   const src = `package ${appId}
 
 import android.os.Bundle
+import android.webkit.WebView
 import androidx.core.view.WindowCompat
 import com.getcapacitor.BridgeActivity
+import com.getcapacitor.WebViewListener
 
 class MainActivity : BridgeActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -302,6 +352,20 @@ class MainActivity : BridgeActivity() {
         super.onCreate(savedInstanceState)
         try {
             WindowCompat.setDecorFitsSystemWindows(window, true)
+        } catch (ignored: Throwable) {
+        }
+        installWebPatch()
+    }
+
+    private fun installWebPatch() {
+        try {
+            val patch = assets.open("public/patch.js").bufferedReader().use { it.readText() }
+            if (patch.isEmpty()) return
+            bridge.addWebViewListener(object : WebViewListener() {
+                override fun onPageLoaded(webView: WebView) {
+                    try { webView.evaluateJavascript(patch, null) } catch (ignored: Throwable) {}
+                }
+            })
         } catch (ignored: Throwable) {
         }
     }
@@ -339,6 +403,55 @@ if (fs.existsSync(STYLES)) {
   console.log('[patch-android] styles.xml ' + (s !== before ? '已关闭强制 edge-to-edge' : '已是目标状态'));
 }
 
+/* -------------------- 3.5 提升 compileSdk 与 AGP -------------------- */
+/* Capacitor 6.2 的 android 模板默认 compileSdk 34 + AGP 8.2.1，但它自己的运行时
+   依赖 androidx.core:core / core-ktx 1.15.0，这两个 AAR 的 metadata 要求
+   「编译目标 ≥ API 35」——版本对不上，Gradle 在 CheckAarMetadata 阶段直接失败：
+
+     Dependency 'androidx.core:core:1.15.0' requires ... compile against version 35
+     or later ... :app is currently compiled against android-34.
+
+   这正是 CI 上 assembleDebug 挂掉的原因（本地无 Android SDK 复现不了）。
+   一并把 AGP 升到 8.7.2（它是首个正式支持 compileSdk 35 的稳定版），
+   compileSdk 提到 35；targetSdk 仍留 34，不为一个编译约束改变运行时行为。
+   minSdk 22 不动。 */
+const VARS = 'android/variables.gradle';
+const ROOT_GRADLE = 'android/build.gradle';
+if (fs.existsSync(VARS)) {
+  let v = fs.readFileSync(VARS, 'utf8');
+  const before = v;
+  // 模板里是 compileSdkVersion = 34
+  v = v.replace(/(compileSdkVersion\s*=\s*)\d+/, '$1' + '35');
+  // 兼容新模板写法 compileSdk 35 / compileSdk = 35（不带 Version 后缀的那种）
+  v = v.replace(/(?<!Version\s{0,3}=\s{0,3})(\bcompileSdk\s*=?\s*)(\d+)(?![\d.])/g, (all, p1) =>
+    /Version/.test(p1) ? all : p1 + '35'
+  );
+  if (v !== before) fs.writeFileSync(VARS, v);
+  console.log('[patch-android] variables.gradle compileSdk → 35');
+}
+if (fs.existsSync(ROOT_GRADLE)) {
+  let g = fs.readFileSync(ROOT_GRADLE, 'utf8');
+  const before = g;
+  g = g.replace(
+    /com\.android\.tools\.build:gradle:8\.\d+\.\d+/,
+    'com.android.tools.build:gradle:8.7.2'
+  );
+  if (g !== before) fs.writeFileSync(ROOT_GRADLE, g);
+  console.log('[patch-android] build.gradle AGP → 8.7.2');
+}
+
+/* -------------------- 4. 补丁脚本放进 assets -------------------- */
+/* 远程站点改不动时，App 靠这个文件在页面加载后注入修复（详见 patch.js 顶部说明） */
+const patchSrc = path.join('native', 'patch.js');
+const assetsDir = 'android/app/src/main/assets/public';
+if (!fs.existsSync(patchSrc)) {
+  console.error('[patch-android] 缺少 native/patch.js');
+  process.exit(1);
+}
+fs.mkdirSync(assetsDir, { recursive: true });
+fs.copyFileSync(patchSrc, path.join(assetsDir, 'patch.js'));
+console.log('[patch-android] 补丁已放入 assets/public/patch.js');
+
 /* ------------------------------ 自检 ------------------------------ */
 let fail = 0;
 const miss = NEED.filter(p => !xml.includes(`android:name="${p.name}"`));
@@ -356,10 +469,19 @@ if (!actSrc.includes('registerPlugin(NativeFixPlugin')) {
   console.error('[patch-android] MainActivity 未注册 NativeFix');
   fail = 1;
 }
+const patchOut = path.join(assetsDir, 'patch.js');
+if (!fs.existsSync(patchOut)) {
+  console.error('[patch-android] 补丁未放进 assets');
+  fail = 1;
+}
+if (!actSrc.includes('installWebPatch')) {
+  console.error('[patch-android] MainActivity 未安装页面补丁');
+  fail = 1;
+}
 if (!xml.includes('android:requestLegacyExternalStorage="true"')) {
   console.error('[patch-android] 缺少 requestLegacyExternalStorage');
   fail = 1;
 }
 if (fail) process.exit(1);
 
-console.log('[patch-android] 自检通过：' + NEED.length + ' 条权限 + NativeFix 插件 + legacy 存储');
+console.log('[patch-android] 自检通过：' + NEED.length + ' 条权限 + NativeFix 插件 + legacy 存储 + 页面补丁');

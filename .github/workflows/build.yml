@@ -96,6 +96,21 @@ jobs:
           grep -q "windowOptOutEdgeToEdgeEnforcement" android/app/src/main/res/values/styles.xml \
             || { echo "styles.xml 缺少 windowOptOutEdgeToEdgeEnforcement"; exit 1; }
           echo "ok edge-to-edge opt-out"
+      - name: 校验编译 SDK 与 AGP（androidx.core 1.15 要求 compileSdk ≥ 35）
+        run: |
+          set -e
+          # 模板默认 34 + AGP 8.2.1，会在 CheckAarMetadata 阶段挂掉：
+          #   Dependency 'androidx.core:core:1.15.0' requires ... compile against 35
+          grep -q "compileSdkVersion = 35" android/variables.gradle \
+            || { echo "compileSdk 未提到 35"; grep compileSdk android/variables.gradle; exit 1; }
+          echo "ok compileSdk 35"
+          grep -q "com.android.tools.build:gradle:8.7.2" android/build.gradle \
+            || { echo "AGP 未升到 8.7.2"; grep "com.android.tools.build" android/build.gradle; exit 1; }
+          echo "ok AGP 8.7.2"
+          # 页面补丁必须随 APK 一起打进 assets，否则远程站点没更新时 App 内修复不生效
+          test -f android/app/src/main/assets/public/patch.js \
+            || { echo "assets/public/patch.js 缺失"; exit 1; }
+          echo "ok patch.js ($(wc -c < android/app/src/main/assets/public/patch.js) bytes)"
       - name: 校验插件已注册
         run: |
           set -e
