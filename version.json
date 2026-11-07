@@ -1,7 +1,7 @@
 {
-  "version": "1.0.36",
+  "version": "1.0.37",
   "channel": "stable",
-  "code": 37,
+  "code": 38,
   "note": "本文件是三端构建仓的唯一版本源，与网页端 version.json 对齐（网页端每次构建自动 +1）。CI 用这里的版本号构建并给三端产物命名，构建成功后自动 +1 写回。同步网页端版本：node native/sync-web-version.mjs <版本号>。",
-  "updatedAt": "2026-11-07T12:21:36Z"
+  "updatedAt": "2026-11-07T13:07:23.046Z"
 }
