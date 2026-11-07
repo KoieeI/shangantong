@@ -1,6 +1,7 @@
 /* 上岸通 · 桌面版主进程
    设计取舍：
-   - 直接加载线上站点，不做本地副本：数据仍在 Supabase，桌面端和网页/小程序看到的是同一份档案；
+   - 直接加载线上站点 https://shangantong.top/，不做本地副本：文字档案在 Cloudflare D1，
+     照片/录音/附件在 R2，桌面端和网页/Android/iOS 登录同一账号即可看到同一份档案；
    - 只开一个窗口，菜单栏隐藏，外观与浏览器标签页几乎一致，但独立任务栏图标、可用快捷键刷新；
    - 外链一律交给系统浏览器，避免在应用内被钓鱼页面困住；
    - 窗口大小/位置记忆在 userData 里，下次打开还原。 */
@@ -9,8 +10,8 @@ const { app, BrowserWindow, shell, Menu, dialog, session } = require('electron')
 const fs = require('fs');
 const path = require('path');
 
-const APP_URL = 'https://civil-service-workbench.app.workbuddy.host/?sharecode=GCYR427BEX';
-const ALLOW_HOST = 'civil-service-workbench.app.workbuddy.host';
+const APP_URL = 'https://shangantong.top/';
+const ALLOW_HOST = 'shangantong.top';
 const STATE_FILE = path.join(app.getPath('userData'), 'window-state.json');
 
 function loadState() {
@@ -45,7 +46,7 @@ let win = null;
 
    前提（缺一个就会静默失效，CI 里已配套）：
    1. Release 必须带 latest.yml 与 *.blockmap；
-   2. 每个新包的版本号必须递增（构建时用 run_number 写进 package.json）；
+   2. 每个新包的版本号必须递增（构建时用统一版本号写进 package.json）；
    3. 包名必须与 latest.yml 里登记的一致（用 artifactName 固定，不在 Release 里改名）。 */
 let updateReady = false;
 function setupAutoUpdate() {

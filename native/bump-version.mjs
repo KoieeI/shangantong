@@ -55,6 +55,7 @@ const next = nextOf(version);
 
 if (has('--bump')) {
   json.version = next;
+  if (json.code != null) json.code = (Number(json.code) || 0) + 1;
   json.updatedAt = new Date().toISOString();
   fs.writeFileSync(FILE, JSON.stringify(json, null, 2) + '\n', 'utf8');
   if (!has('--quiet')) console.log('version.json: ' + version + ' → ' + next);

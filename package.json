@@ -1,6 +1,6 @@
 {
   "name": "shangantong-app",
-  "version": "1.0.26",
+  "version": "1.0.36",
   "private": true,
   "description": "上岸通 · Android / iOS 壳工程（Capacitor）",
   "scripts": {
@@ -11,7 +11,8 @@
     "patch:ios": "node native/patch-ios.mjs",
     "patch:all": "node native/patch-android.mjs && node native/patch-ios.mjs",
     "version:show": "node native/bump-version.mjs --names",
-    "version:bump": "node native/bump-version.mjs --bump"
+    "version:bump": "node native/bump-version.mjs --bump",
+    "version:sync": "node native/sync-web-version.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",

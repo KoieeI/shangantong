@@ -1,97 +1,68 @@
-# 反代服务器（阶段 B 的前置条件）
+# 云端架构与反代方案（已废弃）
 
-移动端要「本地打包 + 离线可用」，就必须有一个**不带 sharecode 网关**的接口地址。
-原因（2026-11-05 实测）：
+> **本文档记录 2026-11-05 的历史方案，2026-11-07 起已不再适用。**
+> 旧方案里的发布域名、`/sbapi` 反代、Supabase 项目与所有相关密钥**全部作废**，
+> 请不要再按下面的步骤部署，也不要复用其中的任何 key。
 
-| 探测 | 结果 |
-|---|---|
-| 无 cookie 请求发布域名的 `/`、`/probe`、`/sbapi/*` | 全部 **403** |
-| 从本机直连 `*.supabase.co` | **000**（连接被重置，0.47s） |
+## 一、现在是怎么跑的（V1.0.36）
 
-所以 App 既不能走发布域名，也不能直连 Supabase，只能自己架一个反代。
-
-## 一、买什么
-
-| 项目 | 建议 | 费用 |
-|---|---|---|
-| 服务器 | 腾讯云/阿里云**香港或境外**轻量，1 核 1G、1Mbps 足够（只有 JSON 同步流量） | 约 ¥24/月起 |
-| 域名 | 任意 `.com` / `.dev`，A 记录指向服务器 IP | ¥30–60/年 |
-
-放境外是因为**不需要备案**；放香港是因为大陆访问延迟低（30–60ms）。
-不要买国内节点——域名备案没下来之前，80/443 会被拦。
-
-## 二、装 Caddy（比 Nginx 少一半配置，自动 HTTPS）
-
-```bash
-sudo apt update && sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-  | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-  | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update && sudo apt install -y caddy
+```
+浏览器 / Android / iOS / Windows 壳
+        │  同源 https://shangantong.top/
+        ▼
+Cloudflare Worker（自定义域 shangantong.top）
+        ├─ Workers Assets  静态站点（index / admin / download / sw / icons）
+        ├─ D1  users / sessions / archives / invites / events / audit_log / media
+        └─ R2  shangantong-media（私有桶，照片 / 录音 / 附件）
 ```
 
-## 三、Caddyfile
+- **不再需要反代**：Worker 自带 `/api/v1/*`，前端同源调用，没有 sharecode 网关，也没有跨域。
+- **不再需要 Supabase**：账号是 Worker 用 PBKDF2 校验后签发的令牌，数据库只存令牌哈希。
+- **不再需要客户端密钥**：前端零密钥，所有敏感操作都要带会话令牌；R2 不开放公共访问。
+- **不再需要境外 VPS / Caddy**：Cloudflare 已承担 HTTPS、证书与边缘分发。
 
-把 `api.example.com` 换成你自己的域名：
+## 二、旧方案为什么被换掉
+
+| 旧问题 | 现状 |
+|---|---|
+| 发布域名要带 `?sharecode=`，无 cookie 请求 `/`、`/sbapi/*` 一律 403 | 自定义域直出，匿名可打开首页 |
+| 本机直连 `*.supabase.co` 被重置，必须自建反代 | 自有 API，同源可达 |
+| Supabase publishable key 写在客户端与文档里 | 前端零密钥；旧 key 已随项目删除作废 |
+| 照片/附件只能留本机，换设备看不到 | R2 按账号隔离，跨设备自动同步 |
+| 版本号四端各写一份 | 网页端 `version.json` 自动 +1，三端由 `sync-web-version.mjs` 对齐 |
+
+## 三、历史方案留档（仅作故障复盘，不要执行）
+
+<details>
+<summary>展开 2026-11-05 的 Caddy 反代步骤（已废弃）</summary>
+
+当时的思路是：买一台境外轻量服务器 + 域名，用 Caddy 只反代 `/sbapi/*` 到 Supabase，
+避免把整台机器做成开放代理。配置文件形如：
 
 ```caddyfile
 api.example.com {
     encode gzip
-
-    # 只反代 Supabase 的 auth 与 rest，其余一律 404
     handle_path /sbapi/* {
-        reverse_proxy https://ntzszgyeamygquxyqnve.supabase.co {
-            header_up Host ntzszgyeamygquxyqnve.supabase.co
+        reverse_proxy https://<已删除的 Supabase 项目>.supabase.co {
+            header_up Host <已删除的 Supabase 项目>.supabase.co
         }
     }
-
-    handle {
-        respond "not found" 404
-    }
+    handle { respond "not found" 404 }
 }
 ```
 
-```bash
-sudo systemctl reload caddy
-```
+安全红线（当时定的，现在仍值得保留）：只反代必要路径、机器上不放长期密钥、
+反代挂掉时本机仍可离线使用、恢复后再同步。
 
-Caddy 会自动申请并续期 Let's Encrypt 证书，无需额外操作。
-DNS 解析生效后再 reload，否则证书申请会失败（日志：`journalctl -u caddy -n 50`）。
+</details>
 
-## 四、验证（三条都要过）
+## 四、迁移时做过的事
 
-```bash
-# 1. 匿名可读：应该返回 JSON（不是 403 网关页）
-curl -s https://api.example.com/sbapi/auth/v1/settings \
-  -H "apikey: sb_publishable_5nmbB_LXp-GJDisBgt1UkA_-mTleMa0" | head -c 120
+1. 删除 Supabase 项目与所有 `/sbapi` 代理代码、旧的 wb 云文档同步代码。
+2. 新开私有 R2 桶 `shangantong-media`，媒体 key 形如 `u/<uid>/<hash>.<ext>`，读写前校验归属。
+3. `capacitor.config.json` 与 `desktop/main.js` 的站点地址统一改为 `https://shangantong.top/`。
+4. `www/index.html` 保留为壳启动兜底页，不再承载业务。
+5. 网页端与三端版本号统一由 `version.json` 驱动，自动递增。
 
-# 2. 不要变成开放代理：随便一个路径应该 404
-curl -s -o /dev/null -w "%{http_code}\n" https://api.example.com/anything
-
-# 3. 错密码应该 400 invalid_credentials（证明 auth 通了）
-curl -s -o /dev/null -w "%{http_code}\n" -X POST \
-  -H "apikey: sb_publishable_5nmbB_LXp-GJDisBgt1UkA_-mTleMa0" \
-  -H "Content-Type: application/json" \
-  -d '{"email":"nobody@example.com","password":"wrongpass123"}' \
-  "https://api.example.com/sbapi/auth/v1/token?grant_type=password"
-```
-
-## 五、安全红线
-
-1. **只反代 `/sbapi/*`**，绝不 `reverse_proxy *`——开放代理会被人白嫖流量甚至滥用到封号。
-2. **这台机器上不放任何密钥**。Supabase 的 `service_role` 永远只在网页端 `server.js` 里，客户端只用 publishable key + RLS。
-3. 建议在 Caddy 里加个简单限流（`rate_limit` 插件）或防火墙只放行 443。
-4. 反代挂了不影响本地使用：App 会把改动存在本机，恢复后再同步——这正是阶段 B 要做的容错。
-
-## 六、免费替代（不推荐做主力）
-
-Cloudflare Worker 也能反代（10 万请求/天免费），但 `*.workers.dev` 域名在大陆经常被污染，
-自定义域名走 Cloudflare 代理也不稳定。可以作为**备用地址**写在 App 里，主力还是自建 VPS。
-
-## 七、有了域名之后我这边要改的
-
-1. `acct.js`：`SB_DEFAULTS.url` → `window.__API_BASE__ || '/sbapi'`（网页端行为不变）
-2. 打包脚本注入 `window.__API_BASE__ = 'https://api.example.com/sbapi'`
-3. 删掉 `capacitor.config.json` 的 `server.url`，`www/` 换成真正的构建产物
-4. `Preferences` 镜像 localStorage + 恢复联网自动同步
+> 提醒：旧版文档里出现过的 Supabase publishable key 属于已删除项目，
+> 即使如此，任何真实密钥都不应写进公开仓库；本仓库现有文件已扫描，无残留密钥。

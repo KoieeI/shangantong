@@ -3,21 +3,29 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#2f8a83">
 <title>上岸通</title>
 <style>
   html,body{height:100%;margin:0}
-  body{display:grid;place-items:center;background:#f7f5f0;color:#48505c;
-       font:15px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
-  .box{text-align:center}
-  .dot{width:36px;height:36px;margin:0 auto 14px;border-radius:12px;background:#2f8a83;opacity:.9}
-  p{margin:0;font-size:13px}
+  body{display:grid;place-items:center;background:#f7f8f9;color:#15181b;
+       font:15px/1.7 -apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+       letter-spacing:.2px}
+  .box{text-align:center;padding:24px}
+  .mark{width:54px;height:54px;margin:0 auto 16px;border-radius:15px;background:#15181b;
+        display:grid;place-items:center;color:#fff;font-size:22px;font-weight:650;
+        box-shadow:0 6px 18px rgba(14,16,18,.18)}
+  p{margin:0;font-size:13px;color:#636363}
+  a{display:inline-block;margin-top:14px;padding:9px 18px;border-radius:10px;
+    background:#15181b;color:#fff;text-decoration:none;font-size:13px}
 </style>
 </head>
 <body>
-  <!-- Capacitor 会把 server.url 指向线上站点，这个页面只是壳加载期间的兜底 -->
+  <!-- Capacitor / Electron 用 server.url 直接加载 https://shangantong.top/，
+       这个页面只是壳启动、站点尚未返回时的兜底，不承载任何业务数据。 -->
   <div class="box">
-    <div class="dot"></div>
+    <div class="mark">上</div>
     <p>正在打开上岸通…</p>
+    <a href="https://shangantong.top/">手动打开网页版</a>
   </div>
 </body>
 </html>

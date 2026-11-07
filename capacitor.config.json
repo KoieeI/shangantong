@@ -4,9 +4,9 @@
   "webDir": "www",
   "bundledWebRuntime": false,
   "server": {
-    "url": "https://civil-service-workbench.app.workbuddy.host/?sharecode=GCYR427BEX",
+    "url": "https://shangantong.top/",
     "allowNavigation": [
-      "civil-service-workbench.app.workbuddy.host"
+      "shangantong.top"
     ]
   },
   "android": {
