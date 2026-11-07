@@ -59,7 +59,9 @@ jobs:
       - name: 写入版本号
         # 自动更新靠 app.getVersion() 与 latest.yml 比对判断新旧，版本号必须每次都涨。
         # 这里用 meta 的统一版本，不再用 run_number，避免和 Android/iOS 对不上。
-        run: npm version ${{ needs.meta.outputs.version }} --no-git-tag-version
+        # --allow-same-version：仓库里的 desktop/package.json 已与 version.json 对齐，
+        # npm version 遇到「版本没变」默认会报错退出，加这个参数让同步后的版本也能直接构建。
+        run: npm version ${{ needs.meta.outputs.version }} --no-git-tag-version --allow-same-version
       - name: 打包 NSIS 安装包
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
